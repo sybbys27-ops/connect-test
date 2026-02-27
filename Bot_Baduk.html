@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 바둑 1:1 게임 (AI 연동 최적화)</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 20px;
+            font-family: sans-serif;
+            box-sizing: border-box;
+        }
+        .panel {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        #play-panel { display: none; } 
+        h3, h4 { margin: 0; }
+        .score-board { display: flex; gap: 20px; font-weight: bold; color: #333; }
+        button {
+            padding: 8px 16px; font-size: 14px; cursor: pointer; font-weight: bold;
+            border: 1px solid #ccc; background-color: #f9f9f9; border-radius: 4px;
+        }
+        button:hover { background-color: #e9e9e9; }
+        
+        #instruction-text {
+            color: #d9534f; font-weight: bold; display: none; margin-bottom: 10px;
+        }
+
+        #game-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 30px;
+        }
+
+        canvas {
+            background-color: #dcbd88; 
+            box-shadow: 3px 3px 15px rgba(0, 0, 0, 0.4);
+            cursor: pointer;
+        }
+
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 320px;
+        }
+
+        #result-panel {
+            display: none; 
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            text-align: center;
+        }
+        #result-panel h2 { margin-top: 0; color: #333; border-bottom: 2px solid #333; padding-bottom: 10px; }
+
+        /* AI 상태 데이터를 보여주는 패널 (분리 및 고정) */
+        #ai-data-panel {
+            background: #2b2b2b;
+            color: #a9b7c6;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: block; /* 초기부터 보이도록 수정 */
+        }
+        #ai-data-panel h3 { margin-top: 0; color: #ffc66d; font-size: 16px; margin-bottom: 10px; }
+        
+        /* 히스토리 영역: 스크롤 자동화 및 최대 높이 지정 */
+        #ai-history-container {
+            max-height: 150px; /* 적당한 높이로 제한하여 스크롤 생성 */
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #555;
+        }
+        
+        /* 바둑판 영역: 스크롤 없이 항상 고정 */
+        #ai-board-container {
+            /* 바둑판은 고정되어 항상 보이게 됨 */
+        }
+
+        .ai-text-box {
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre;
+            line-height: 1.4;
+        }
+
+        .ai-toggle-btn {
+            background-color: #2b2b2b;
+            color: #ffc66d;
+            border: none;
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+        }
+        .ai-toggle-btn:hover { background-color: #3c3f41; }
+        
+        /* 스크롤바 디자인 (다크테마에 맞게) */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #2b2b2b; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+    </style>
+</head>
+<body>
+
+    <div id="setup-panel" class="panel">
+        <h3>대국 설정</h3>
+        <label><input type="radio" name="gameType" value="even" checked> 호선 (백 덤 6.5집)</label>
+        <label><input type="radio" name="gameType" value="handicap"> 정선 (덤 없음)</label>
+        <select id="handicap-count" disabled>
+            <option value="2">2점</option>
+            <option value="3">3점</option>
+            <option value="4">4점</option>
+        </select>
+        <button id="start-btn">대국 시작</button>
+    </div>
+
+    <div id="instruction-text">
+        [사석 지정] 바둑판 위에 남아있는 죽은 돌을 마우스로 클릭하여 걷어내세요. (클릭 시 X 표시됨)
+    </div>
+
+    <div id="play-panel" class="panel">
+        <h3 id="turn-indicator">현재 차례: ⚫ 흑</h3>
+        <div class="score-board">
+            <span id="black-captures">흑이 따낸 돌: 0개</span> | 
+            <span id="white-captures">백이 따낸 돌: 0개</span>
+        </div>
+        <button id="undo-btn">무르기</button>
+        <button id="resign-btn" style="background-color: #f0ad4e; border-color: #eea236; color: white;">대국 재시작 (불계)</button>
+        <button id="end-btn" style="background-color: #ffcccc; border-color: #ff9999;">대국 종료 (사석 지정)</button>
+        <button id="finish-scoring-btn" style="display:none; background-color: #d4edda; border-color: #c3e6cb;">계가 완료 (집 계산)</button>
+    </div>
+
+    <div id="game-container">
+        <canvas id="goBoard" width="620" height="620"></canvas>
+
+        <div class="right-column">
+            <div id="result-panel">
+                <h2>대국 결과</h2>
+                <div id="result-text" style="font-size: 16px; margin-bottom: 25px; line-height: 1.8;"></div>
+                <button onclick="location.reload()" style="width: 100%; padding: 12px; font-size: 16px; background-color: #4CAF50; color: white; border: none;">새로운 대국 시작</button>
+            </div>
+
+            <button class="ai-toggle-btn" onclick="toggleAIData()">🤖 AI 인식 데이터 확인 (열기/닫기)</button>
+            
+            <div id="ai-data-panel">
+                <h3>[실시간 DOM 데이터]</h3>
+                
+                <div id="ai-history-container">
+                    <div id="ai-history-text" class="ai-text-box">대국을 시작하면 히스토리가 갱신됩니다.</div>
+                </div>
+                
+                <div id="ai-board-container">
+                    <div id="ai-board-text" class="ai-text-box">대국을 시작하면 바둑판이 갱신됩니다.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('goBoard');
+        const ctx = canvas.getContext('2d');
+        const boardSize = 19; 
+        const cellSize = 30;  
+        const margin = 40; 
+        const X_LABELS = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
+
+        const turnIndicator = document.getElementById('turn-indicator');
+        const setupPanel = document.getElementById('setup-panel');
+        const playPanel = document.getElementById('play-panel');
+        const handicapSelect = document.getElementById('handicap-count');
+        const blackCapturesEl = document.getElementById('black-captures');
+        const whiteCapturesEl = document.getElementById('white-captures');
+        const instructionText = document.getElementById('instruction-text');
+        const endBtn = document.getElementById('end-btn');
+        const undoBtn = document.getElementById('undo-btn');
+        const resignBtn = document.getElementById('resign-btn');
+        const finishScoringBtn = document.getElementById('finish-scoring-btn');
+        const resultPanel = document.getElementById('result-panel'); 
+        
+        // 분리된 텍스트 박스 요소들
+        const aiHistoryText = document.getElementById('ai-history-text');
+        const aiHistoryContainer = document.getElementById('ai-history-container');
+        const aiBoardText = document.getElementById('ai-board-text');
+
+        let boardState = Array.from(Array(boardSize), () => Array(boardSize).fill(0));
+        let territoryMap = null; 
+        let currentPlayer = 1; 
+        let koPoint = null; 
+        let history = [];
+        let moveHistory = []; 
+        let isGameStarted = false;
+        let komi = 6.5; 
+        let captures = { 1: 0, 2: 0 }; 
+        let isMarkingDeadStones = false;
+        let isGameOver = false;
+        let deadStonesSet = new Set(); 
+
+        document.querySelector('input[value="even"]').addEventListener('change', () => handicapSelect.disabled = true);
+        document.querySelector('input[value="handicap"]').addEventListener('change', () => handicapSelect.disabled = false);
+
+        function toggleAIData() {
+            const panel = document.getElementById('ai-data-panel');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function getCoordString(x, y) {
+            return X_LABELS[x] + (y + 1);
+        }
+
+        // AI 데이터 업데이트 및 화면 분리, 자동 스크롤 로직 적용
+        function updateAIState() {
+            if (!isGameStarted) return;
+            
+            // 1. 히스토리 텍스트 생성
+            let historyText = "=== 게임 기본 정보 ===\n";
+            historyText += `현재 차례: ${currentPlayer === 1 ? '흑(Black)' : '백(White)'}\n`;
+            historyText += `흑 따낸 돌: ${captures[1]}개 | 백 따낸 돌: ${captures[2]}개\n`;
+            historyText += `덤: ${komi}집\n\n`;
+
+            historyText += "=== 착수 흐름 ===\n";
+            if (moveHistory.length === 0) {
+                historyText += "(아직 착수된 돌이 없습니다.)\n";
+            } else {
+                moveHistory.forEach((move, index) => {
+                    historyText += `${index + 1}수: ${move.player === 1 ? '흑' : '백'} - ${move.coord}\n`;
+                });
+            }
+            
+            // 히스토리 화면에 텍스트 넣고 스크롤 맨 아래로 내리기
+            aiHistoryText.innerText = historyText;
+            aiHistoryContainer.scrollTop = aiHistoryContainer.scrollHeight;
+
+            // 2. 바둑판 텍스트 생성
+            let boardText = "=== 현재 바둑판 상태 (ASCII) ===\n";
+            boardText += "   " + X_LABELS.join(" ") + "\n";
+            for (let y = 0; y < boardSize; y++) {
+                let rowStr = (y + 1).toString().padStart(2, ' ') + " ";
+                for (let x = 0; x < boardSize; x++) {
+                    if (boardState[y][x] === 0) rowStr += ". ";
+                    else if (boardState[y][x] === 1) rowStr += "X "; 
+                    else rowStr += "O "; 
+                }
+                boardText += rowStr + "\n";
+            }
+            
+            // 바둑판 화면에 텍스트 넣기 (고정)
+            aiBoardText.innerText = boardText;
+        }
+
+        function updateUI() {
+            turnIndicator.innerHTML = currentPlayer === 1 ? '현재 차례: ⚫ 흑' : '현재 차례: ⚪ 백';
+            blackCapturesEl.innerText = `흑이 따낸 돌: ${captures[1]}개`;
+            whiteCapturesEl.innerText = `백이 따낸 돌: ${captures[2]}개`;
+            updateAIState(); 
+        }
+
+        function drawCoordinates() {
+            ctx.fillStyle = '#000000';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (let i = 0; i < boardSize; i++) {
+                ctx.fillText(X_LABELS[i], margin + i * cellSize, margin / 2);
+                ctx.fillText(X_LABELS[i], margin + i * cellSize, canvas.height - margin / 2);
+                ctx.fillText(i + 1, margin / 2, margin + i * cellSize);
+                ctx.fillText(i + 1, canvas.width - margin / 2, margin + i * cellSize);
+            }
+        }
+
+        function drawBoard() {
+            ctx.beginPath();
+            for (let i = 0; i < boardSize; i++) {
+                ctx.moveTo(margin, margin + i * cellSize);
+                ctx.lineTo(canvas.width - margin, margin + i * cellSize);
+                ctx.moveTo(margin + i * cellSize, margin);
+                ctx.lineTo(margin + i * cellSize, canvas.height - margin);
+            }
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            
+            const starPoints = [3, 9, 15];
+            starPoints.forEach(x => {
+                starPoints.forEach(y => {
+                    ctx.beginPath();
+                    ctx.arc(margin + x * cellSize, margin + y * cellSize, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = '#000000';
+                    ctx.fill();
+                });
+            });
+            drawCoordinates();
+        }
+
+        function drawStone(x, y, player) {
+            ctx.beginPath();
+            ctx.arc(margin + x * cellSize, margin + y * cellSize, 14, 0, Math.PI * 2);
+            ctx.fillStyle = player === 1 ? '#000000' : '#ffffff';
+            ctx.fill();
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawBoard();
+            
+            if (territoryMap) {
+                for (let y = 0; y < boardSize; y++) {
+                    for (let x = 0; x < boardSize; x++) {
+                        if (territoryMap[y][x] === 1) { 
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                            ctx.fillRect(margin + x * cellSize - 7, margin + y * cellSize - 7, 14, 14);
+                        } else if (territoryMap[y][x] === 2) { 
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                            ctx.fillRect(margin + x * cellSize - 7, margin + y * cellSize - 7, 14, 14);
+                        }
+                    }
+                }
+            }
+
+            for (let y = 0; y < boardSize; y++) {
+                for (let x = 0; x < boardSize; x++) {
+                    if (boardState[y][x] !== 0) {
+                        drawStone(x, y, boardState[y][x]);
+                        
+                        if (deadStonesSet.has(`${x},${y}`)) {
+                            ctx.beginPath();
+                            ctx.moveTo(margin + x * cellSize - 8, margin + y * cellSize - 8);
+                            ctx.lineTo(margin + x * cellSize + 8, margin + y * cellSize + 8);
+                            ctx.moveTo(margin + x * cellSize + 8, margin + y * cellSize - 8);
+                            ctx.lineTo(margin + x * cellSize - 8, margin + y * cellSize + 8);
+                            ctx.strokeStyle = '#ff0000';
+                            ctx.lineWidth = 3;
+                            ctx.stroke();
+                        }
+                    }
+                }
+            }
+        }
+
+        function getGroupInfo(startX, startY, player) {
+            const visited = Array.from({ length: boardSize }, () => Array(boardSize).fill(false));
+            const group = [];
+            const libertiesSet = new Set(); 
+            const queue = [{ x: startX, y: startY }];
+            visited[startY][startX] = true;
+            let head = 0;
+            const dx = [0, 0, -1, 1], dy = [-1, 1, 0, 0];
+
+            while (head < queue.length) {
+                const { x, y } = queue[head++];
+                group.push({ x, y });
+                for (let i = 0; i < 4; i++) {
+                    const nx = x + dx[i], ny = y + dy[i];
+                    if (nx >= 0 && nx < boardSize && ny >= 0 && ny < boardSize) {
+                        if (boardState[ny][nx] === 0) libertiesSet.add(`${nx},${ny}`); 
+                        else if (boardState[ny][nx] === player && !visited[ny][nx]) {
+                            visited[ny][nx] = true;
+                            queue.push({ x: nx, y: ny }); 
+                        }
+                    }
+                }
+            }
+            return { group, liberties: libertiesSet.size };
+        }
+
+        function saveState() {
+            history.push({
+                board: boardState.map(row => [...row]),
+                player: currentPlayer,
+                ko: koPoint ? { ...koPoint } : null,
+                captures: { ...captures },
+                moveHistory: [...moveHistory] 
+            });
+        }
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            let selectedType = document.querySelector('input[name="gameType"]:checked').value;
+            isGameStarted = true;
+            setupPanel.style.display = 'none';
+            playPanel.style.display = 'flex';
+            moveHistory = []; 
+
+            if (selectedType === 'handicap') {
+                komi = 0; 
+                const count = parseInt(handicapSelect.value);
+                const hoshi = [{x:15, y:3}, {x:3, y:15}, {x:3, y:3}, {x:15, y:15}];
+                let placedPoints = [];
+                for(let i=0; i<count; i++) {
+                    boardState[hoshi[i].y][hoshi[i].x] = 1; 
+                    placedPoints.push(getCoordString(hoshi[i].x, hoshi[i].y));
+                }
+                moveHistory.push({ player: 1, coord: `접바둑 화점(${placedPoints.join(', ')})` });
+                currentPlayer = 2; 
+            } else {
+                komi = 6.5; currentPlayer = 1; 
+            }
+            updateUI();
+            render();
+        });
+
+        resignBtn.addEventListener('click', () => {
+            if (confirm("대국을 기권(불계)하거나 초기화하시겠습니까? 처음 화면으로 돌아갑니다.")) {
+                location.reload();
+            }
+        });
+
+        endBtn.addEventListener('click', () => {
+            if (!confirm("대국을 종료하고 사석(죽은 돌) 지정 단계로 넘어가시겠습니까?")) return;
+            isMarkingDeadStones = true;
+            endBtn.style.display = 'none';
+            undoBtn.style.display = 'none';
+            resignBtn.style.display = 'none'; 
+            turnIndicator.style.display = 'none';
+            finishScoringBtn.style.display = 'inline-block';
+            instructionText.style.display = 'block';
+        });
+
+        finishScoringBtn.addEventListener('click', () => {
+            if (!confirm("사석 지정을 완료하고 최종 집 계산을 진행하시겠습니까?")) return;
+            isGameOver = true;
+            isMarkingDeadStones = false;
+            
+            deadStonesSet.forEach(coord => {
+                const [x, y] = coord.split(',').map(Number);
+                const deadStoneColor = boardState[y][x];
+                if (deadStoneColor === 1) captures[2]++; 
+                if (deadStoneColor === 2) captures[1]++; 
+                boardState[y][x] = 0; 
+            });
+            deadStonesSet.clear(); 
+
+            let blackTerritory = 0;
+            let whiteTerritory = 0;
+            territoryMap = Array.from(Array(boardSize), () => Array(boardSize).fill(null));
+            const visited = Array.from({ length: boardSize }, () => Array(boardSize).fill(false));
+
+            for (let y = 0; y < boardSize; y++) {
+                for (let x = 0; x < boardSize; x++) {
+                    if (boardState[y][x] === 0 && !visited[y][x]) {
+                        let queue = [{x, y}];
+                        let region = [];
+                        let touchesBlack = false;
+                        let touchesWhite = false;
+                        visited[y][x] = true;
+                        let head = 0;
+                        const dx = [0, 0, -1, 1], dy = [-1, 1, 0, 0];
+
+                        while (head < queue.length) {
+                            let curr = queue[head++];
+                            region.push(curr);
+
+                            for (let i=0; i<4; i++) {
+                                const nx = curr.x + dx[i], ny = curr.y + dy[i];
+                                if (nx >= 0 && nx < boardSize && ny >= 0 && ny < boardSize) {
+                                    if (boardState[ny][nx] === 1) touchesBlack = true;
+                                    else if (boardState[ny][nx] === 2) touchesWhite = true;
+                                    else if (boardState[ny][nx] === 0 && !visited[ny][nx]) {
+                                        visited[ny][nx] = true;
+                                        queue.push({x: nx, y: ny});
+                                    }
+                                }
+                            }
+                        }
+
+                        if (touchesBlack && !touchesWhite) {
+                            blackTerritory += region.length;
+                            region.forEach(p => territoryMap[p.y][p.x] = 1);
+                        } else if (touchesWhite && !touchesBlack) {
+                            whiteTerritory += region.length;
+                            region.forEach(p => territoryMap[p.y][p.x] = 2);
+                        }
+                    }
+                }
+            }
+
+            render(); 
+
+            const totalBlackScore = blackTerritory + captures[1];
+            const totalWhiteScore = whiteTerritory + captures[2] + komi;
+            
+            let resultMessage = `
+                <div style="text-align: left; background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <span style="display:inline-block; margin-bottom: 5px;">⚫ <b>흑:</b> 집(${blackTerritory}) + 사석(${captures[1]})<br> = <b>총 ${totalBlackScore}집</b></span><br>
+                    <hr style="border: 0; border-top: 1px solid #ddd; margin: 10px 0;">
+                    <span style="display:inline-block;">⚪ <b>백:</b> 집(${whiteTerritory}) + 사석(${captures[2]})<br> + 덤(${komi}) = <b>총 ${totalWhiteScore}집</b></span>
+                </div>
+            `;
+
+            if (totalBlackScore > totalWhiteScore) {
+                resultMessage += `<h3 style="color:#0056b3; margin:0;">흑이 ${totalBlackScore - totalWhiteScore}집 차이로 승리했습니다!</h3>`;
+            } else if (totalWhiteScore > totalBlackScore) {
+                resultMessage += `<h3 style="color:#d9534f; margin:0;">백이 ${totalWhiteScore - totalBlackScore}집 차이로 승리했습니다!</h3>`;
+            } else {
+                resultMessage += `<h3 style="margin:0;">무승부 (빅) 입니다!</h3>`;
+            }
+
+            document.getElementById('result-text').innerHTML = resultMessage;
+            resultPanel.style.display = 'block'; 
+            finishScoringBtn.style.display = 'none';
+            instructionText.style.display = 'none';
+            
+            aiHistoryText.innerText += "\n\n=== 대국 종료 및 계가 결과 ===\n" + document.getElementById('result-text').innerText;
+            aiHistoryContainer.scrollTop = aiHistoryContainer.scrollHeight;
+        });
+
+        canvas.addEventListener('click', (event) => {
+            if (!isGameStarted || isGameOver) return; 
+
+            const rect = canvas.getBoundingClientRect();
+            const gridX = Math.round((event.clientX - rect.left - margin) / cellSize);
+            const gridY = Math.round((event.clientY - rect.top - margin) / cellSize);
+
+            if (gridX < 0 || gridX >= boardSize || gridY < 0 || gridY >= boardSize) return;
+
+            if (isMarkingDeadStones) {
+                if (boardState[gridY][gridX] !== 0) {
+                    const player = boardState[gridY][gridX];
+                    const info = getGroupInfo(gridX, gridY, player);
+                    const firstKey = `${info.group[0].x},${info.group[0].y}`;
+                    
+                    if (deadStonesSet.has(firstKey)) {
+                        info.group.forEach(s => deadStonesSet.delete(`${s.x},${s.y}`));
+                    } else {
+                        info.group.forEach(s => deadStonesSet.add(`${s.x},${s.y}`));
+                    }
+                    render();
+                }
+                return;
+            }
+
+            if (boardState[gridY][gridX] !== 0) return; 
+
+            if (koPoint && koPoint.x === gridX && koPoint.y === gridY) {
+                alert("패(Ko) 규칙: 바로 다시 따낼 수 없습니다.");
+                return;
+            }
+
+            saveState();
+            boardState[gridY][gridX] = currentPlayer;
+
+            moveHistory.push({ player: currentPlayer, coord: getCoordString(gridX, gridY) });
+
+            const opponent = currentPlayer === 1 ? 2 : 1;
+            const dx = [0, 0, -1, 1], dy = [-1, 1, 0, 0];
+            let capturedStones = []; 
+
+            for (let i = 0; i < 4; i++) {
+                const nx = gridX + dx[i], ny = gridY + dy[i];
+                if (nx >= 0 && nx < boardSize && ny >= 0 && ny < boardSize) {
+                    if (boardState[ny][nx] === opponent) {
+                        const info = getGroupInfo(nx, ny, opponent);
+                        if (info.liberties === 0) capturedStones.push(...info.group);
+                    }
+                }
+            }
+
+            const uniqueCapturedStones = Array.from(
+                new Set(capturedStones.map(s => `${s.x},${s.y}`))
+            ).map(str => {
+                const [x, y] = str.split(',');
+                return {x: parseInt(x), y: parseInt(y)};
+            });
+
+            const myInfo = getGroupInfo(gridX, gridY, currentPlayer);
+            
+            if (myInfo.liberties === 0 && uniqueCapturedStones.length === 0) {
+                boardState[gridY][gridX] = 0; 
+                history.pop(); 
+                moveHistory.pop(); 
+                alert("착수 금지점(자충수)입니다.");
+                return;
+            }
+
+            if (uniqueCapturedStones.length > 0) {
+                captures[currentPlayer] += uniqueCapturedStones.length;
+                uniqueCapturedStones.forEach(stone => boardState[stone.y][stone.x] = 0);
+            }
+
+            if (uniqueCapturedStones.length === 1 && myInfo.group.length === 1 && getGroupInfo(gridX, gridY, currentPlayer).liberties === 1) {
+                koPoint = { x: uniqueCapturedStones[0].x, y: uniqueCapturedStones[0].y };
+            } else {
+                koPoint = null; 
+            }
+
+            currentPlayer = opponent;
+            updateUI();
+            render();
+        });
+
+        undoBtn.addEventListener('click', () => {
+            if (history.length > 0) {
+                const lastState = history.pop();
+                boardState = lastState.board;
+                currentPlayer = lastState.player;
+                koPoint = lastState.ko;
+                captures = lastState.captures;
+                moveHistory = lastState.moveHistory; 
+                updateUI();
+                render();
+            } else {
+                alert("더 이상 무를 수 없습니다.");
+            }
+        });
+
+        render();
+    </script>
+</body>
+</html>
