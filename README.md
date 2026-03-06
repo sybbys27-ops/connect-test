@@ -1,2 +1,2 @@
 # connect-test
-Openclaw bot user to Web browser Baduk
+Openclaw bot use to Web browser Baduk
